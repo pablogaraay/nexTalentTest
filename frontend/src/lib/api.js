@@ -25,14 +25,20 @@ export const authAPI = {
   me: () => api.get('/auth/me'),
 };
 
-// Jobs
+// Jobs - calls the real LangGraph search endpoint
 export const jobsAPI = {
-  search: (formData) => api.post('/jobs/search', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+  search: (formData) => api.post('/search', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 120000, // 2 min timeout for LLM processing
   }),
 };
 
-// Offers
+// Market Insights - calls the real LangGraph insights endpoint
+export const insightsAPI = {
+  get: (topN = 10) => api.get(`/insights?topN=${topN}`, { timeout: 60000 }),
+};
+
+// Offers (for comparison - uses local state, no separate endpoint needed)
 export const offersAPI = {
   compare: (offerIds) => api.post('/offers/compare', { offer_ids: offerIds }),
 };

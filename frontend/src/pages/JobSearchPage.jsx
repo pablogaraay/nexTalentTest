@@ -1,14 +1,15 @@
 import { useState, useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Search, Upload, FileText, MapPin, Building2, Clock, CheckCircle, X, GitCompareArrows, Briefcase } from 'lucide-react';
+import { Search, Upload, FileText, MapPin, Building2, Clock, CheckCircle, X, GitCompareArrows, Briefcase, ExternalLink, AlertCircle } from 'lucide-react';
 import { jobsAPI } from '@/lib/api';
 
 export default function JobSearchPage() {
-  const [searchMode, setSearchMode] = useState('prompt'); // 'prompt' | 'cv'
+  const [searchMode, setSearchMode] = useState('prompt');
   const [prompt, setPrompt] = useState('');
   const [cvFile, setCvFile] = useState(null);
   const [results, setResults] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
   const [selectedOffers, setSelectedOffers] = useState([]);
   const [compareMode, setCompareMode] = useState(false);
 
@@ -24,18 +25,45 @@ export default function JobSearchPage() {
 
   const handleSearch = async () => {
     setLoading(true);
+    setError('');
     try {
       const formData = new FormData();
       if (searchMode === 'cv' && cvFile) {
-        formData.append('cv_file', cvFile);
-      } else {
-        formData.append('prompt', prompt);
+        formData.append('cv', cvFile);
+      }
+      if (prompt.trim()) {
+        formData.append('profileText', prompt);
       }
       const { data } = await jobsAPI.search(formData);
-      setResults(data);
+
+      // Transform LangGraph response to frontend format
+      const resultData = data.result || {};
+      const offers = (resultData.results || []).map((offer, i) => ({
+        id: `offer-${i}`,
+        title: offer.title || 'Sin titulo',
+        company: offer.company || 'Empresa desconocida',
+        location: offer.location || '',
+        role_raw: offer.role_raw || '',
+        url: offer.url || '',
+        match_score: Math.round((offer.match_score || 0) * 100),
+        matched_skills: offer.matched_skills || [],
+        why_match: offer.why_match || '',
+        vector_score: offer.vector_score || 0,
+        job_mapping: offer.job_mapping || {},
+      }));
+
+      const profile = resultData.profile || {};
+      setResults({
+        offers,
+        total: resultData.total_candidates || offers.length,
+        profile,
+        query: prompt || 'CV uploaded',
+      });
       setSelectedOffers([]);
       setCompareMode(false);
     } catch (err) {
+      const detail = err.response?.data?.detail;
+      setError(typeof detail === 'string' ? detail : 'Error en la busqueda. Intenta de nuevo.');
       console.error(err);
     } finally {
       setLoading(false);
@@ -49,8 +77,8 @@ export default function JobSearchPage() {
   };
 
   const getMatchColor = (score) => {
-    if (score >= 85) return 'var(--terracotta)';
-    if (score >= 70) return '#b8860b';
+    if (score >= 70) return 'var(--terracotta)';
+    if (score >= 40) return '#b8860b';
     return 'var(--stone-gray)';
   };
 
@@ -63,7 +91,7 @@ export default function JobSearchPage() {
             Busqueda Avanzada de Empleo
           </h1>
           <p className="font-sans text-lg" style={{ color: 'var(--olive-gray)', lineHeight: 1.6 }}>
-            Encuentra las ofertas que mejor se ajustan a tu perfil profesional.
+            Encuentra las ofertas que mejor se ajustan a tu perfil. Powered by LangGraph + Groq.
           </p>
         </div>
 
@@ -108,16 +136,9 @@ export default function JobSearchPage() {
                 data-testid="search-prompt-input"
                 value={prompt}
                 onChange={e => setPrompt(e.target.value)}
-                placeholder="Ej: Desarrollador frontend con 3 anios de experiencia en React y TypeScript, busco trabajo remoto en Madrid..."
+                placeholder="Ej: Desarrollador frontend con 3 anos de experiencia en React y TypeScript, busco trabajo remoto en Madrid..."
                 className="w-full rounded-xl p-4 text-sm font-sans resize-none focus:outline-none focus:ring-2"
-                style={{
-                  backgroundColor: 'var(--parchment)',
-                  border: '1px solid var(--border-cream)',
-                  color: 'var(--near-black)',
-                  minHeight: '120px',
-                  lineHeight: 1.6,
-                  focusRingColor: 'var(--focus-blue)',
-                }}
+                style={{ backgroundColor: 'var(--parchment)', border: '1px solid var(--border-cream)', color: 'var(--near-black)', minHeight: '120px', lineHeight: 1.6 }}
                 rows={4}
               />
             </div>
@@ -137,70 +158,87 @@ export default function JobSearchPage() {
                   <div className="flex items-center justify-center gap-3">
                     <FileText size={24} style={{ color: 'var(--terracotta)' }} />
                     <span className="font-sans text-sm" style={{ color: 'var(--near-black)', fontWeight: 500 }}>{cvFile.name}</span>
-                    <button
-                      data-testid="remove-cv-btn"
-                      onClick={e => { e.stopPropagation(); setCvFile(null); }}
-                      className="p-1 rounded-full"
-                      style={{ backgroundColor: 'var(--warm-sand)' }}
-                    >
+                    <button data-testid="remove-cv-btn" onClick={e => { e.stopPropagation(); setCvFile(null); }} className="p-1 rounded-full" style={{ backgroundColor: 'var(--warm-sand)' }}>
                       <X size={14} style={{ color: 'var(--charcoal-warm)' }} />
                     </button>
                   </div>
                 ) : (
                   <div>
                     <Upload size={32} style={{ color: 'var(--stone-gray)', margin: '0 auto 12px' }} />
-                    <p className="font-sans text-sm" style={{ color: 'var(--olive-gray)' }}>
-                      Arrastra tu CV aqui o haz clic para seleccionarlo
-                    </p>
+                    <p className="font-sans text-sm" style={{ color: 'var(--olive-gray)' }}>Arrastra tu CV aqui o haz clic para seleccionarlo</p>
                     <p className="font-sans text-xs mt-1" style={{ color: 'var(--stone-gray)' }}>Solo PDF</p>
                   </div>
                 )}
               </div>
+              {/* Optional: also add a prompt alongside CV */}
+              <div className="mt-4">
+                <label className="block text-xs font-sans mb-1" style={{ color: 'var(--stone-gray)' }}>
+                  Opcional: anade un mensaje para refinar la busqueda
+                </label>
+                <input
+                  data-testid="cv-prompt-input"
+                  type="text"
+                  value={prompt}
+                  onChange={e => setPrompt(e.target.value)}
+                  placeholder="Ej: Busco trabajo remoto en Madrid"
+                  className="w-full rounded-xl px-4 py-2.5 text-sm font-sans focus:outline-none"
+                  style={{ backgroundColor: 'var(--parchment)', border: '1px solid var(--border-cream)', color: 'var(--near-black)' }}
+                />
+              </div>
+            </div>
+          )}
+
+          {error && (
+            <div data-testid="search-error" className="mt-3 flex items-center gap-2 p-3 rounded-lg text-sm font-sans" style={{ backgroundColor: 'rgba(181,51,51,0.08)', color: 'var(--error-crimson)' }}>
+              <AlertCircle size={16} /> {error}
             </div>
           )}
 
           <button
             data-testid="search-submit-btn"
             onClick={handleSearch}
-            disabled={loading || (searchMode === 'prompt' && !prompt.trim()) || (searchMode === 'cv' && !cvFile)}
+            disabled={loading || (searchMode === 'prompt' && !prompt.trim()) || (searchMode === 'cv' && !cvFile && !prompt.trim())}
             className="mt-4 w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl text-base font-sans transition-all disabled:opacity-50"
-            style={{
-              backgroundColor: 'var(--terracotta)',
-              color: 'var(--ivory)',
-              fontWeight: 500,
-            }}
+            style={{ backgroundColor: 'var(--terracotta)', color: 'var(--ivory)', fontWeight: 500 }}
           >
             {loading ? (
-              <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+              <div className="flex items-center gap-3">
+                <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                <span>Analizando perfil con IA...</span>
+              </div>
             ) : (
-              <>
-                <Search size={18} />
-                Buscar Ofertas
-              </>
+              <><Search size={18} /> Buscar Ofertas</>
             )}
           </button>
         </div>
 
+        {/* Profile Summary (from LLM parsing) */}
+        {results?.profile && results.profile.role && (
+          <div data-testid="profile-summary" className="rounded-2xl p-5 mb-6" style={{ backgroundColor: 'var(--ivory)', border: '1px solid var(--border-cream)' }}>
+            <h3 className="font-serif mb-3" style={{ fontSize: '1.1rem', fontWeight: 500, color: 'var(--near-black)' }}>
+              Perfil Detectado
+            </h3>
+            <div className="flex flex-wrap gap-4 text-sm font-sans" style={{ color: 'var(--olive-gray)' }}>
+              {results.profile.role && <div><span style={{ color: 'var(--stone-gray)' }}>Rol:</span> <strong style={{ color: 'var(--near-black)' }}>{results.profile.role}</strong></div>}
+              {results.profile.seniority_raw && results.profile.seniority_raw !== 'unknown' && <div><span style={{ color: 'var(--stone-gray)' }}>Seniority:</span> <strong style={{ color: 'var(--near-black)' }}>{results.profile.seniority_raw}</strong></div>}
+              {results.profile.location_query && <div><span style={{ color: 'var(--stone-gray)' }}>Ubicacion:</span> <strong style={{ color: 'var(--near-black)' }}>{results.profile.location_query}</strong></div>}
+            </div>
+            {results.profile.skills?.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {results.profile.skills.map(s => (
+                  <span key={s} className="px-2.5 py-0.5 rounded-md text-xs font-sans" style={{ backgroundColor: 'rgba(201,100,66,0.08)', color: 'var(--terracotta)', fontWeight: 500 }}>{s}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Compare Bar */}
         {selectedOffers.length >= 2 && (
-          <div
-            data-testid="compare-bar"
-            className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-6 py-3 rounded-2xl animate-fade-in-up"
-            style={{
-              backgroundColor: 'var(--near-black)',
-              boxShadow: 'rgba(0,0,0,0.2) 0px 8px 32px',
-            }}
-          >
+          <div data-testid="compare-bar" className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 px-6 py-3 rounded-2xl animate-fade-in-up" style={{ backgroundColor: 'var(--near-black)', boxShadow: 'rgba(0,0,0,0.2) 0px 8px 32px' }}>
             <GitCompareArrows size={18} style={{ color: 'var(--coral)' }} />
-            <span className="font-sans text-sm" style={{ color: 'var(--ivory)' }}>
-              {selectedOffers.length} ofertas seleccionadas
-            </span>
-            <button
-              data-testid="compare-toggle-btn"
-              onClick={() => setCompareMode(!compareMode)}
-              className="px-4 py-1.5 rounded-lg text-sm font-sans"
-              style={{ backgroundColor: 'var(--terracotta)', color: 'var(--ivory)', fontWeight: 500 }}
-            >
+            <span className="font-sans text-sm" style={{ color: 'var(--ivory)' }}>{selectedOffers.length} ofertas seleccionadas</span>
+            <button data-testid="compare-toggle-btn" onClick={() => setCompareMode(!compareMode)} className="px-4 py-1.5 rounded-lg text-sm font-sans" style={{ backgroundColor: 'var(--terracotta)', color: 'var(--ivory)', fontWeight: 500 }}>
               {compareMode ? 'Volver a lista' : 'Comparar'}
             </button>
           </div>
@@ -211,10 +249,10 @@ export default function JobSearchPage() {
           <div data-testid="search-results">
             <div className="flex items-center justify-between mb-6">
               <h2 className="font-serif" style={{ fontSize: '1.6rem', fontWeight: 500, color: 'var(--near-black)' }}>
-                {results.total} ofertas encontradas
+                {results.offers.length} ofertas encontradas
               </h2>
               <span className="font-sans text-xs px-3 py-1 rounded-full" style={{ backgroundColor: 'var(--warm-sand)', color: 'var(--charcoal-warm)' }}>
-                Ordenadas por relevancia
+                De {results.total} candidatas analizadas
               </span>
             </div>
             <div className="grid gap-4">
@@ -227,8 +265,7 @@ export default function JobSearchPage() {
                     backgroundColor: 'var(--ivory)',
                     border: selectedOffers.includes(offer.id) ? '2px solid var(--terracotta)' : '1px solid var(--border-cream)',
                     boxShadow: 'rgba(0,0,0,0.03) 0px 2px 12px',
-                    animationDelay: `${i * 0.05}s`,
-                    animationFillMode: 'forwards',
+                    animationDelay: `${i * 0.05}s`, animationFillMode: 'forwards',
                   }}
                 >
                   <div className="flex flex-col md:flex-row md:items-start gap-4">
@@ -242,71 +279,75 @@ export default function JobSearchPage() {
                             <span className="flex items-center gap-1 text-sm font-sans" style={{ color: 'var(--olive-gray)' }}>
                               <Building2 size={14} /> {offer.company}
                             </span>
-                            <span className="flex items-center gap-1 text-sm font-sans" style={{ color: 'var(--olive-gray)' }}>
-                              <MapPin size={14} /> {offer.location}
-                            </span>
-                            <span className="flex items-center gap-1 text-sm font-sans" style={{ color: 'var(--olive-gray)' }}>
-                              <Clock size={14} /> {offer.experience_years} anos exp.
-                            </span>
+                            {offer.location && (
+                              <span className="flex items-center gap-1 text-sm font-sans" style={{ color: 'var(--olive-gray)' }}>
+                                <MapPin size={14} /> {offer.location}
+                              </span>
+                            )}
+                            {offer.role_raw && (
+                              <span className="flex items-center gap-1 text-sm font-sans" style={{ color: 'var(--olive-gray)' }}>
+                                <Briefcase size={14} /> {offer.role_raw}
+                              </span>
+                            )}
                           </div>
                         </div>
                         <div className="flex items-center gap-2">
-                          <div
-                            className="px-3 py-1 rounded-full text-sm font-sans"
-                            style={{
-                              backgroundColor: `${getMatchColor(offer.match_score)}15`,
-                              color: getMatchColor(offer.match_score),
-                              fontWeight: 600,
-                            }}
-                          >
+                          <div className="px-3 py-1 rounded-full text-sm font-sans" style={{ backgroundColor: `${getMatchColor(offer.match_score)}15`, color: getMatchColor(offer.match_score), fontWeight: 600 }}>
                             {offer.match_score}% match
                           </div>
                         </div>
                       </div>
 
-                      <p className="font-sans text-sm my-3" style={{ color: 'var(--olive-gray)', lineHeight: 1.6 }}>
-                        {offer.description}
-                      </p>
+                      {offer.why_match && (
+                        <p className="font-sans text-xs my-2 px-3 py-1.5 rounded-lg inline-block" style={{ backgroundColor: 'var(--parchment)', color: 'var(--stone-gray)' }}>
+                          {offer.why_match}
+                        </p>
+                      )}
 
-                      <div className="flex flex-wrap gap-1.5 mb-3">
-                        {offer.skills.map(skill => (
-                          <span
-                            key={skill}
-                            className="px-2.5 py-0.5 rounded-md text-xs font-sans"
-                            style={{ backgroundColor: 'var(--warm-sand)', color: 'var(--charcoal-warm)', fontWeight: 500 }}
-                          >
-                            {skill}
-                          </span>
-                        ))}
-                      </div>
+                      {offer.matched_skills.length > 0 && (
+                        <div className="flex flex-wrap gap-1.5 mb-3">
+                          <span className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>Skills coincidentes:</span>
+                          {offer.matched_skills.map(skill => (
+                            <span key={skill} className="px-2.5 py-0.5 rounded-md text-xs font-sans" style={{ backgroundColor: 'rgba(201,100,66,0.08)', color: 'var(--terracotta)', fontWeight: 500 }}>
+                              {skill}
+                            </span>
+                          ))}
+                        </div>
+                      )}
 
-                      <div className="flex flex-wrap items-center gap-4">
-                        <span className="font-sans text-sm" style={{ color: 'var(--near-black)', fontWeight: 600 }}>
-                          <Briefcase size={14} className="inline mr-1" />{offer.salary_range}
-                        </span>
-                        {offer.remote && (
-                          <span className="flex items-center gap-1 text-xs font-sans px-2 py-0.5 rounded-md" style={{ backgroundColor: 'rgba(201,100,66,0.08)', color: 'var(--terracotta)', fontWeight: 500 }}>
-                            <CheckCircle size={12} /> Remoto
-                          </span>
-                        )}
-                        <span className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>
-                          {offer.type}
-                        </span>
-                      </div>
+                      {offer.job_mapping?.job_title_wef && (
+                        <div className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>
+                          WEF Job: {offer.job_mapping.job_title_wef} ({offer.job_mapping.job_family_wef})
+                        </div>
+                      )}
                     </div>
 
-                    <button
-                      data-testid={`select-offer-${offer.id}`}
-                      onClick={() => toggleOfferSelection(offer.id)}
-                      className="self-start px-3 py-2 rounded-lg text-xs font-sans whitespace-nowrap transition-all"
-                      style={{
-                        backgroundColor: selectedOffers.includes(offer.id) ? 'var(--terracotta)' : 'var(--warm-sand)',
-                        color: selectedOffers.includes(offer.id) ? 'var(--ivory)' : 'var(--charcoal-warm)',
-                        fontWeight: 500,
-                      }}
-                    >
-                      {selectedOffers.includes(offer.id) ? 'Seleccionada' : 'Seleccionar'}
-                    </button>
+                    <div className="flex flex-col gap-2 self-start">
+                      {offer.url && (
+                        <a
+                          href={offer.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          data-testid={`offer-link-${offer.id}`}
+                          className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-sans no-underline whitespace-nowrap"
+                          style={{ backgroundColor: 'var(--terracotta)', color: 'var(--ivory)', fontWeight: 500 }}
+                        >
+                          <ExternalLink size={12} /> Ver oferta
+                        </a>
+                      )}
+                      <button
+                        data-testid={`select-offer-${offer.id}`}
+                        onClick={() => toggleOfferSelection(offer.id)}
+                        className="px-3 py-2 rounded-lg text-xs font-sans whitespace-nowrap transition-all"
+                        style={{
+                          backgroundColor: selectedOffers.includes(offer.id) ? 'var(--near-black)' : 'var(--warm-sand)',
+                          color: selectedOffers.includes(offer.id) ? 'var(--ivory)' : 'var(--charcoal-warm)',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {selectedOffers.includes(offer.id) ? 'Seleccionada' : 'Comparar'}
+                      </button>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -323,50 +364,37 @@ export default function JobSearchPage() {
             <div className="overflow-x-auto">
               <div className="grid gap-4" style={{ gridTemplateColumns: `repeat(${selectedOffers.length}, minmax(280px, 1fr))` }}>
                 {results.offers.filter(o => selectedOffers.includes(o.id)).map(offer => (
-                  <div
-                    key={offer.id}
-                    data-testid={`compare-card-${offer.id}`}
-                    className="rounded-2xl p-5"
-                    style={{ backgroundColor: 'var(--ivory)', border: '1px solid var(--border-cream)' }}
-                  >
+                  <div key={offer.id} data-testid={`compare-card-${offer.id}`} className="rounded-2xl p-5" style={{ backgroundColor: 'var(--ivory)', border: '1px solid var(--border-cream)' }}>
                     <div className="px-3 py-1 rounded-full text-sm font-sans inline-block mb-3" style={{ backgroundColor: `${getMatchColor(offer.match_score)}15`, color: getMatchColor(offer.match_score), fontWeight: 600 }}>
                       {offer.match_score}% match
                     </div>
                     <h3 className="font-serif mb-1" style={{ fontSize: '1.1rem', fontWeight: 500, color: 'var(--near-black)' }}>{offer.title}</h3>
                     <p className="font-sans text-sm mb-4" style={{ color: 'var(--olive-gray)' }}>{offer.company}</p>
-
                     {[
-                      { label: 'Ubicacion', value: offer.location },
-                      { label: 'Salario', value: offer.salary_range },
-                      { label: 'Experiencia', value: `${offer.experience_years} anos` },
-                      { label: 'Tipo', value: offer.type },
-                      { label: 'Remoto', value: offer.remote ? 'Si' : 'No' },
+                      { label: 'Ubicacion', value: offer.location || 'N/A' },
+                      { label: 'Rol', value: offer.role_raw || 'N/A' },
+                      { label: 'Vector Score', value: `${(offer.vector_score * 100).toFixed(1)}%` },
                     ].map(row => (
                       <div key={row.label} className="flex justify-between py-2 border-t" style={{ borderColor: 'var(--border-cream)' }}>
                         <span className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>{row.label}</span>
                         <span className="text-xs font-sans" style={{ color: 'var(--near-black)', fontWeight: 500 }}>{row.value}</span>
                       </div>
                     ))}
-
-                    <div className="mt-3">
-                      <span className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>Skills</span>
-                      <div className="flex flex-wrap gap-1 mt-1">
-                        {offer.skills.map(s => (
-                          <span key={s} className="px-2 py-0.5 rounded-md text-xs font-sans" style={{ backgroundColor: 'var(--warm-sand)', color: 'var(--charcoal-warm)' }}>{s}</span>
-                        ))}
+                    {offer.matched_skills.length > 0 && (
+                      <div className="mt-3">
+                        <span className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>Skills Coincidentes</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {offer.matched_skills.map(s => (
+                            <span key={s} className="px-2 py-0.5 rounded-md text-xs font-sans" style={{ backgroundColor: 'rgba(201,100,66,0.08)', color: 'var(--terracotta)' }}>{s}</span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-
-                    <div className="mt-3">
-                      <span className="text-xs font-sans" style={{ color: 'var(--stone-gray)' }}>Beneficios</span>
-                      <div className="flex flex-col gap-1 mt-1">
-                        {offer.benefits.map(b => (
-                          <span key={b} className="flex items-center gap-1 text-xs font-sans" style={{ color: 'var(--olive-gray)' }}>
-                            <CheckCircle size={10} style={{ color: 'var(--terracotta)' }} /> {b}
-                          </span>
-                        ))}
-                      </div>
-                    </div>
+                    )}
+                    {offer.url && (
+                      <a href={offer.url} target="_blank" rel="noopener noreferrer" className="mt-3 flex items-center gap-1 text-xs font-sans no-underline" style={{ color: 'var(--terracotta)', fontWeight: 500 }}>
+                        <ExternalLink size={12} /> Ver oferta original
+                      </a>
+                    )}
                   </div>
                 ))}
               </div>
